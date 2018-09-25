@@ -1,7 +1,7 @@
 
 # Purpose: this script trains the flgden emulator using the specific netcdf files. 
 
-# 0. Set Up -----------------------------------------------------------------------------------------------------------------
+# 0. Set Up -----------------------------------------------------------------------------------------------------------------------
 
 BASE   <- '/pic/projects/GCAM/Dorheim/frontEnd_grandExp'
 OUTPUT <- file.path(BASE, 'output-L1', 'emulator'); dir.create(OUTPUT, showWarnings = FALSE, recursive = TRUE)
@@ -23,9 +23,9 @@ showMessages <- TRUE # if set to FALSE in order to suppress messages
 if(showMessages) message('1. Train Emulator')
 
 # Use all of the rcp experiments in the to_process csv file to train the emulator
-emulator_time <- system.time( emulator <- trainTP(to_process$path, Ngrid = 259200,
-                                                 tvarname = "tas", tlatvar = "lat", tlonvar = "lon",
-                                                 pvarname = "pr", platvar = "lat", plonvar = "lon", globalAvg_file = 'GlobalAvg.txt'))
+emulator_time <- system.time( emulator <- trainTP(dat = to_process$path, Ngrid = 259200,
+                                                  tvarname = "tas", tlatvar = "lat", tlonvar = "lon",
+                                                  pvarname = "pr", platvar = "lat", plonvar = "lon", globalAvg_file = 'GlobalAvg.txt'))
 
 # Create a tibble to save some information about the emulator.
 tibble(emulator = 'emulator-1',
@@ -36,13 +36,13 @@ tibble(emulator = 'emulator-1',
 
 
 # 2. Save emulator and info ----------------------------------------------------------------------------------------------------------
-is(showMessages) message('2. Save emulator and info')
+if(showMessages) message('2. Save emulator and info')
 
-info_outputF     <- file.path(OUTPUT, 'emulator-1_info.rds')
-emulator_outputF <- file.path(OUTPUT, 'emulator_info.csv')
+emulator_outputF <- file.path(OUTPUT, 'emulator-1.rds')
+info_outputF     <- file.path(OUTPUT, 'emulator_info.csv')
 
-saveRDS(emulator_info, file = info_outputF)
-write.csv(emulator_info, file = emulator_outputF, row.names = FALSE)
+saveRDS(emulator, file = emulator_outputF)
+write.csv(emulator_info, file = info_outputF, row.names = FALSE)
 
 if(showMessages) message('saving ', info_outputF, '\n', emulator_outputF)
 if(showMessages) message('end of script')
