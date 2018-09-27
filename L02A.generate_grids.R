@@ -9,7 +9,8 @@ showMessages <- TRUE # if set to FALSE in order to suppress messages
 if(showMessages) message('0. Set Up ')
 
 # Set up the directories
-BASE   <- '/pic/projects/GCAM/Dorheim/frontEnd_grandExp'
+#BASE   <- '/pic/projects/GCAM/Dorheim/frontEnd_grandExp'
+BASE <- getwd()
 OUTPUT <- file.path(BASE, 'output-L2'); dir.create(OUTPUT, showWarnings = FALSE, recursive = TRUE)
 dir.create(OUTPUT, showWarnings = FALSE, recursive = TRUE)
 
