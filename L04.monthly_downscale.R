@@ -5,6 +5,8 @@
 
 # TODO: this should be more felxible but we are working on a time constraint. 
 
+# TODO: add the L04B.fromating stuff to this script! 
+
 # 0. Set up ----------------------------------------------------------------------------
 
 library(dplyr)
