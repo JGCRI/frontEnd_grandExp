@@ -1,21 +1,22 @@
-# KALYN I THINK THAT YOU ARE GOING TO WANT TO CHANGE THIS TO JUST A FUNCTION.R file
-
-
-# Purpose: this script defines the functions used to run the front end of the grand experiment, there
-# are several TODOs that mark potential enhancements. This code depends on
-# fldgen (https://stash.pnnl.gov/users/snyd535/repos/fldgen/browse?at=refs%2Fheads%2Fstreamline_grandEXP)
-# and then an2month (https://github.com/JGCRI/an2month/tree/streamline_grandEXP)
+# A collection of functions for the grand experiment 
 
 library(foreach)
-library(fldgen)
-library(an2month)
+library(fldgen)   # (https://stash.pnnl.gov/users/snyd535/repos/fldgen/browse?at=refs%2Fheads%2Fstreamline_grandEXP) must be on the streamline_grandEXP branch
+library(an2month) # (https://github.com/JGCRI/an2month/tree/streamline_grandEXP) must be on the streamline_grandEXP branch
 library(reticulate)
 library(dplyr)
 library(tidyr)
 library(lubridate)
+library(doParallel)
 
-# A function that will throw an error if the data frame is missing columns. Optional dfName argument
-# adds information to the error message.
+# Check a data frame for required columns
+#
+# Args: 
+#   df: a data frame to check 
+#   req_cols: a string vector of the required column names
+#   dfName: an optional argument for the data frame name that will be incorporated into the error message if a column is missing
+# Returns: 
+#   if df is missing a req_cols then the function throws an error
 check_columns <- function(df, req_cols, dfName = NULL){
 
   missing <- !req_cols %in% names(df)
@@ -24,67 +25,67 @@ check_columns <- function(df, req_cols, dfName = NULL){
 
 }
 
-# TODO remove the Sys.time calls!!
-# mapping:
-#   Data from emulator_mapping.csv
-# N:
-#   Number of iterations
-# tgavSCN:
-#   Temperature scenario, data from hector_tgav.csv
+
+# mapping <- '/Users/brau074/Documents/grand_experiment/emulator_mapping.csv'
+# tgavSCN <- '/Users/brau074/Documents/grand_experiment/hector_tgav.csv'
+
+
+# Use Hector to emulate ESM tas and pr monthly gridded data as inputs into Xanthos
 #
-# mapping <- read.csv('/Users/brau074/Documents/grand_experiment/emulator_mapping.csv', header=T, stringsAsFactors = F)
-# tgavSCN <- read.csv('/Users/brau074/Documents/grand_experiment/hector_tgav.csv', header = T, stringsAsFactors = F)
-grand_experiment <- function(mapping, N, tgavSCN, globalAvg_file = 'GlobalAvg.txt'){
+# Args: 
+#   mapping: a path to the emulator mapping csv file containing a data frame of emulatorName and trainingFile paths
+#   tgavSCN: the path to the Hector temperature output stream file containing a data frame that is used as the mean field when generating the tas and pr full grids, must contain total temp in degree K. NOTE – this will change to a list of hector ini files.
+#   N: the number of tas and pr realizations to produce for each emulator and temperature scenario 
+#   globalAvg_file: an optional argument used to indicate the end of the annual global average data to use during emulator training, if 
+#           set to NULL then the function will use the global average calculated internally by the training function.
+#   cores: an optional argument to specify the number of cores to parallelize over, if set to NULL then uses default doParallel::registerDoParallel settings.
 
-  x1 <- Sys.time()
-
-  # Check inputs
-  check_columns(mapping, c("emulatorName", "trainningFile"), 'mapping input')
+grand_experiment <- function(mapping, tgavSCN, N, globalAvg_file = 'GlobalAvg.txt', cores = NULL){
+  
+  # Import files and check inputs
+  stopifnot(file.exists(mapping))
+  stopifnot(file.exists(tgavSCN))
+  
+  mapping <- read.csv(mapping, header = TRUE, stringsAsFactors = FALSE)
+  tgavSCN <- read.csv(tgavSCN, header = TRUE, stringsAsFactors = FALSE)
+  
+  check_columns(mapping, c("emulatorName", "trainingFile"), 'mapping input')
   check_columns(tgavSCN,  c('run_name', 'time', 'tgav'), 'tgavSCN input')
-  stopifnot(is.character(mapping$trainningFile))
-  stopifnot(file.exists(mapping$trainningFile))
+  stopifnot(is.character(mapping$trainingFile))
+  stopifnot(file.exists(mapping$trainingFile))
 
-  x2 <- Sys.time() - x1
-  message('Done checking inputs: ', x2)
-
+  # Apply over the emulators defined in the emulator mapping file and use the 
+  # training files to train the tas and pr emulator. 
   lapply(split(mapping, mapping$emulatorName), function(emulator_mapping){
+    
+    # TODO remove Ngrid when update the fldgen branch
+    emulator <- fldgen::trainTP(dat = emulator_mapping[['trainingFile']], Ngrid = NULL, globalAvg_file = globalAvg_file)
 
-    x3 <- Sys.time()
-    # TODO I think that the Ngrid argument will be dropped evenutally due to pacakges changes
-    # Train the emulator with the trainning files specified in the mapping file, the emulator
-    # will be used to generate the residuals and the temp/pr full grids.
-    emulator <- fldgen::trainTP(dat = emulator_mapping[['trainningFile']], Ngrid = NULL, globalAvg_file = globalAvg_file)
-    x4 <- Sys.time() - x3
-    message('Done trainning emulator: ', x4)
-
-    # TODO this will eventually be replaced with some mechanism to run hector with different ini files!
-    # TODO this is going to need to be chagned so that it looks at year not time!
+    # Apply over the different Hector runs. NOTE - this is going to change when we run Hector from here. When we do this 
+    # we will have to add a method to convert from Tgav C to tas K.
     lapply(split(tgavSCN, tgavSCN$run_name), function(tgav_input){
 
-      # TODO we need to figure out what years to subset the hector output for so that it matches the
-      # emulator trainning years. Right now now the best way to extract years is from the training name,
-      # hopefully there will be a better method with the user enhancements to fldgen.
+      # Subset the Hector tas data so that it only includes values from the emulator training years. 
+      # TODO this section might change with fldgen updates.
       start_stop <- as.integer(unlist(stringr::str_split(stringr::str_sub(basename(emulator$infiles), -12, -4), pattern = '-')))
       start_yr   <- min(start_stop)
       stop_yr    <- max(start_stop)
-
       tgav_input <- tgav_input[tgav_input$time %in% start_yr:stop_yr, ]
-
-
-      # TODO we might want to change this to %dopar% to parallelize this process
-      foreach(i = 1:N) %do% {
-
-        x5 <- Sys.time()
+      
+      # Generate N number of gridded realizations
+      # TODO when we rung on pic we are going to want to use doParallel::registerDoParallel() and %dopar% to parallelize this step 
+      foreach::foreach(i = 1:N) %do% {
+        
         # Generate the full tas and pr annual grids without any NA values.
         full_grids <- fldgen::generate.TP.fullgrids(emulator = emulator, residgrids = generate.TP.resids(emulator, 1),  tgav = tgav_input, addNAs = FALSE)
-        x6 <- Sys.time() - x5
-        message('Done generating full grids for itteration ', i, ' ', x6)
 
-
-        x7 <- Sys.time()
-        # Downscale to monthly time step!
-        # TODO there needs to be some mechanism so that the fraction used to downscale is not hard coded... i wonder if we want to add some esm column
-        # to the emulator mapping file and then update the fraction file names in an2month...
+        # Replace the negative pr values in the full grids with 0s. 
+        # TODO This is just a temporary fix and will eventually be removed.
+        negative_pr_cells <- which(full_grids$fullgrids[[1]]$pr < 0)
+        full_grids$fullgrids[[1]]$pr[negative_pr_cells] <- 0 
+        
+        # Monthly downscaling 
+        # TODO make the frac argument dynamic so that it reflects the emulator ESM.
         monthly_pr  <- an2month::monthly_downscaling(
           var = 'pr',
           frac = an2month::`ipsl-cm5a-lr_frac`,
@@ -98,10 +99,8 @@ grand_experiment <- function(mapping, N, tgavSCN, globalAvg_file = 'GlobalAvg.tx
           fld = full_grids$fullgrids[[1]], fld_coordinates = full_grids$coordinates,
           fld_time = full_grids$time
         )
-        x8 <- Sys.time() - x7
-        message('Down temporal downscaling for itteration ', i, ' ', x8)
 
-        # add the code to run xanthos here
+        # add the code to run xanthos
         run_xanthos(monthly_pr, monthly_tas)
 
       }
