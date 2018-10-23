@@ -107,7 +107,9 @@ grand_experiment <- function(mapping, tgavSCN, xanthos_dir, N, globalAvg_file = 
           fld_time = full_grids$time
         )
 
-        run_xanthos(xanthos_dir, monthly_pr, monthly_tas)
+        run_id <- paste(unique(emulator_mapping$emulatorName),
+                        unique(tgav_input$run_name), i, sep = '_')
+        run_xanthos(xanthos_dir, monthly_pr, monthly_tas, run_id)
       }
     })
   })
@@ -140,7 +142,8 @@ check_columns <- function(df, req_cols, dfName = NULL) {
 #     and units (string)
 #   monthly_tas: List containing data (2d matrix), coordinates (lat/lon mapping),
 #     and units (string)
-run_xanthos <- function(xanthos_dir, monthly_pr, monthly_tas) {
+#   run_id: Unique identifier for each run, used to name Xanthos output directory
+run_xanthos <- function(xanthos_dir, monthly_pr, monthly_tas, run_id) {
   stopifnot(monthly_pr$units == "mm_month-1")
   stopifnot(monthly_tas$units == "C")
 
@@ -158,7 +161,8 @@ run_xanthos <- function(xanthos_dir, monthly_pr, monthly_tas) {
 
   # Input temperature data for Xanthos as an R matrix. Must be a named list
   # where the name is the Xanthos config parameter it is replacing.
-  xth_params <- list(trn_tas = tas_x, PrecipitationFile = pr_x)
+  xth_params <- list(trn_tas = tas_x, PrecipitationFile = pr_x,
+                     OutputFolder = paste0(xanthos_dir, 'output/', run_id))
 
   # Instantiate and run Xanthos
   config_path <- paste0(xanthos_dir, 'trn_abcd_mrtm_gexp.ini')
@@ -195,4 +199,3 @@ extract_xanthos_cells2d <- function(cells, xcells, ycells) {
   cells[ , bothcells$index]
   return(t(cells))
 }
-
