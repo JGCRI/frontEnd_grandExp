@@ -31,6 +31,7 @@ init <- function(mapping, tgavSCN, xanthos_dir) {
 
   # Make sure that reticulate can find the version of python from `module load`
   Sys.setenv(RETICULATE_PYTHON = Sys.which('python'))
+  stopifnot(py_numpy_available(initialize = TRUE))
 
   return(list(mapping = mapping, tgavSCN = tgavSCN))
 }
