@@ -7,23 +7,32 @@ library(reticulate)
 library(dplyr)
 library(tidyr)
 library(lubridate)
-# library(doParallel)
+library(doParallel)
 
-# Check a data frame for required columns
+
+# Initialize inputs and setings for Grand Experiment
 #
-# Args:
-#   df: a data frame to check
-#   req_cols: a string vector of the required column names
-#   dfName: an optional argument for the data frame name that will be
-#     incorporated into the error message if a column is missing
+# Import files and check inputs; set up python interpreter correctly for PIC.
+#
 # Returns:
-#   if df is missing a req_cols then the function throws an error
-check_columns <- function(df, req_cols, dfName = NULL) {
+#   List of length two containing mapping and tgavSCN data
+init <- function(mapping, tgavSCN, xanthos_dir) {
+  stopifnot(file.exists(mapping))
+  stopifnot(file.exists(tgavSCN))
+  stopifnot(dir.exists(xanthos_dir))
 
-  missing <- !req_cols %in% names(df)
+  mapping <- read.csv(mapping, header = TRUE, stringsAsFactors = FALSE)
+  tgavSCN <- read.csv(tgavSCN, header = TRUE, stringsAsFactors = FALSE)
 
-  if(any(missing)) stop(dfName, ' missing columns ', req_cols[missing])
+  check_columns(mapping, c("emulatorName", "trainingFile"), 'mapping input')
+  check_columns(tgavSCN,  c('run_name', 'time', 'tgav'), 'tgavSCN input')
+  stopifnot(is.character(mapping$trainingFile))
+  stopifnot(file.exists(mapping$trainingFile))
 
+  # Make sure that reticulate can find the version of python from `module load`
+  Sys.setenv(RETICULATE_PYTHON = Sys.which('python'))
+
+  return(list(mapping = mapping, tgavSCN = tgavSCN))
 }
 
 
@@ -36,6 +45,7 @@ check_columns <- function(df, req_cols, dfName = NULL) {
 #     data frame that is used as the mean field when generating the tas and pr
 #     full grids, must contain total temp in degree K.
 #     NOTE – this will change to a list of hector ini files.
+#   xanthos_dir: Full file path to xanthos input/output directory
 #   N: the number of tas and pr realizations to produce for each emulator and
 #     temperature scenario
 #   globalAvg_file: an optional argument used to indicate the end of the annual
@@ -45,23 +55,12 @@ check_columns <- function(df, req_cols, dfName = NULL) {
 #   cores: an optional argument to specify the number of cores to parallelize
 #     over, if set to NULL then uses default doParallel::registerDoParallel
 #     settings.
-grand_experiment <- function(mapping, tgavSCN, N, globalAvg_file = 'GlobalAvg.txt', cores = NULL) {
-
-  # Import files and check inputs
-  stopifnot(file.exists(mapping))
-  stopifnot(file.exists(tgavSCN))
-
-  mapping <- read.csv(mapping, header = TRUE, stringsAsFactors = FALSE)
-  tgavSCN <- read.csv(tgavSCN, header = TRUE, stringsAsFactors = FALSE)
-
-  check_columns(mapping, c("emulatorName", "trainingFile"), 'mapping input')
-  check_columns(tgavSCN,  c('run_name', 'time', 'tgav'), 'tgavSCN input')
-  stopifnot(is.character(mapping$trainingFile))
-  stopifnot(file.exists(mapping$trainingFile))
+grand_experiment <- function(mapping, tgavSCN, xanthos_dir, N, globalAvg_file = 'GlobalAvg.txt', cores = NULL) {
+  inputs <- init(mapping, tgavSCN, xanthos_dir)
 
   # Apply over the emulators defined in the emulator mapping file and use the
   # training files to train the tas and pr emulator.
-  lapply(split(mapping, mapping$emulatorName), function(emulator_mapping) {
+  lapply(split(inputs$mapping, inputs$mapping$emulatorName), function(emulator_mapping) {
 
     # TODO remove Ngrid when update the fldgen branch
     emulator <- fldgen::trainTP(dat = emulator_mapping[['trainingFile']], Ngrid = NULL, globalAvg_file = globalAvg_file)
@@ -69,7 +68,7 @@ grand_experiment <- function(mapping, tgavSCN, N, globalAvg_file = 'GlobalAvg.tx
     # Apply over the different Hector runs.
     # NOTE - this is going to change when we run Hector from here. When we do
     # this we will have to add a method to convert from Tgav C to tas K.
-    lapply(split(tgavSCN, tgavSCN$run_name), function(tgav_input) {
+    lapply(split(inputs$tgavSCN, inputs$tgavSCN$run_name), function(tgav_input) {
 
       # Subset the Hector tas data so that it only includes values from the
       # emulator training years.
@@ -108,31 +107,45 @@ grand_experiment <- function(mapping, tgavSCN, N, globalAvg_file = 'GlobalAvg.tx
           fld_time = full_grids$time
         )
 
-        run_xanthos(monthly_pr, monthly_tas)
-
-        stop("You ran Xanthos, good job!")
+        run_xanthos(xanthos_dir, monthly_pr, monthly_tas)
       }
     })
   })
 }
 
 
+# Check a data frame for required columns
+#
+# Args:
+#   df: a data frame to check
+#   req_cols: a string vector of the required column names
+#   dfName: an optional argument for the data frame name that will be
+#     incorporated into the error message if a column is missing
+# Returns:
+#   if df is missing a req_cols then the function throws an error
+check_columns <- function(df, req_cols, dfName = NULL) {
+
+  missing <- !req_cols %in% names(df)
+
+  if(any(missing)) stop(dfName, ' missing columns ', req_cols[missing])
+
+}
+
+
 # Run Xanthos
 #
 # Args:
+#   xanthos_dir: Full file path to xanthos input/output directory
 #   monthly_pr: List containing data (2d matrix), coordinates (lat/lon mapping),
 #     and units (string)
 #   monthly_tas: List containing data (2d matrix), coordinates (lat/lon mapping),
 #     and units (string)
-run_xanthos <- function(monthly_pr, monthly_tas) {
+run_xanthos <- function(xanthos_dir, monthly_pr, monthly_tas) {
   stopifnot(monthly_pr$units == "mm_month-1")
   stopifnot(monthly_tas$units == "C")
 
-  # Full file path to xanthos input/output directory
-  XANTHOS_IO_DIR <- '/Users/brau074/Documents/grand_experiment/xanthos_io/'
-
   # Load reference file mapping Xanthos cell index to lat/lon
-  xcells_path <- paste0(XANTHOS_IO_DIR, 'input/reference/coordinates.csv')
+  xcells_path <- paste0(xanthos_dir, 'input/reference/coordinates.csv')
   xcolnames <- c('cell_id', 'lon', 'lat', 'lon_idx', 'lat_idx')
   xcells <- read.csv(xcells_path, header = F, col.names = xcolnames)
 
@@ -148,7 +161,7 @@ run_xanthos <- function(monthly_pr, monthly_tas) {
   xth_params <- list(trn_tas = tas_x, PrecipitationFile = pr_x)
 
   # Instantiate and run Xanthos
-  config_path <- paste0(XANTHOS_IO_DIR, 'trn_abcd_mrtm_gexp.ini')
+  config_path <- paste0(xanthos_dir, 'trn_abcd_mrtm_gexp.ini')
   xth.mod <- import('xanthos')
   xth <- xth.mod$Xanthos(config_path)
 
@@ -183,9 +196,3 @@ extract_xanthos_cells2d <- function(cells, xcells, ycells) {
   return(t(cells))
 }
 
-
-run_all <- function() {
-  mapping <- '/Users/brau074/Documents/grand_experiment/emulator_mapping.csv'
-  tgavSCN <- '/Users/brau074/Documents/grand_experiment/hector_tgav.csv'
-  grand_experiment(mapping, tgavSCN, 1)
-}
