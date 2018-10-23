@@ -1,4 +1,4 @@
-# A collection of functions for the grand experiment 
+# A collection of functions for the grand experiment
 
 library(foreach)
 library(fldgen)   # (https://stash.pnnl.gov/users/snyd535/repos/fldgen/browse?at=refs%2Fheads%2Fstreamline_grandEXP) must be on the streamline_grandEXP branch
@@ -7,17 +7,18 @@ library(reticulate)
 library(dplyr)
 library(tidyr)
 library(lubridate)
-library(doParallel)
+# library(doParallel)
 
 # Check a data frame for required columns
 #
-# Args: 
-#   df: a data frame to check 
+# Args:
+#   df: a data frame to check
 #   req_cols: a string vector of the required column names
-#   dfName: an optional argument for the data frame name that will be incorporated into the error message if a column is missing
-# Returns: 
+#   dfName: an optional argument for the data frame name that will be
+#     incorporated into the error message if a column is missing
+# Returns:
 #   if df is missing a req_cols then the function throws an error
-check_columns <- function(df, req_cols, dfName = NULL){
+check_columns <- function(df, req_cols, dfName = NULL) {
 
   missing <- !req_cols %in% names(df)
 
@@ -26,65 +27,72 @@ check_columns <- function(df, req_cols, dfName = NULL){
 }
 
 
-# mapping <- '/Users/brau074/Documents/grand_experiment/emulator_mapping.csv'
-# tgavSCN <- '/Users/brau074/Documents/grand_experiment/hector_tgav.csv'
-
-
 # Use Hector to emulate ESM tas and pr monthly gridded data as inputs into Xanthos
 #
-# Args: 
-#   mapping: a path to the emulator mapping csv file containing a data frame of emulatorName and trainingFile paths
-#   tgavSCN: the path to the Hector temperature output stream file containing a data frame that is used as the mean field when generating the tas and pr full grids, must contain total temp in degree K. NOTE – this will change to a list of hector ini files.
-#   N: the number of tas and pr realizations to produce for each emulator and temperature scenario 
-#   globalAvg_file: an optional argument used to indicate the end of the annual global average data to use during emulator training, if 
-#           set to NULL then the function will use the global average calculated internally by the training function.
-#   cores: an optional argument to specify the number of cores to parallelize over, if set to NULL then uses default doParallel::registerDoParallel settings.
+# Args:
+#   mapping: a path to the emulator mapping csv file containing a data frame of
+#     emulatorName and trainingFile paths
+#   tgavSCN: the path to the Hector temperature output stream file containing a
+#     data frame that is used as the mean field when generating the tas and pr
+#     full grids, must contain total temp in degree K.
+#     NOTE – this will change to a list of hector ini files.
+#   N: the number of tas and pr realizations to produce for each emulator and
+#     temperature scenario
+#   globalAvg_file: an optional argument used to indicate the end of the annual
+#     global average data to use during emulator training, if set to NULL then
+#     the function will use the global average calculated internally by the
+#     training function.
+#   cores: an optional argument to specify the number of cores to parallelize
+#     over, if set to NULL then uses default doParallel::registerDoParallel
+#     settings.
+grand_experiment <- function(mapping, tgavSCN, N, globalAvg_file = 'GlobalAvg.txt', cores = NULL) {
 
-grand_experiment <- function(mapping, tgavSCN, N, globalAvg_file = 'GlobalAvg.txt', cores = NULL){
-  
   # Import files and check inputs
   stopifnot(file.exists(mapping))
   stopifnot(file.exists(tgavSCN))
-  
+
   mapping <- read.csv(mapping, header = TRUE, stringsAsFactors = FALSE)
   tgavSCN <- read.csv(tgavSCN, header = TRUE, stringsAsFactors = FALSE)
-  
+
   check_columns(mapping, c("emulatorName", "trainingFile"), 'mapping input')
   check_columns(tgavSCN,  c('run_name', 'time', 'tgav'), 'tgavSCN input')
   stopifnot(is.character(mapping$trainingFile))
   stopifnot(file.exists(mapping$trainingFile))
 
-  # Apply over the emulators defined in the emulator mapping file and use the 
-  # training files to train the tas and pr emulator. 
-  lapply(split(mapping, mapping$emulatorName), function(emulator_mapping){
-    
+  # Apply over the emulators defined in the emulator mapping file and use the
+  # training files to train the tas and pr emulator.
+  lapply(split(mapping, mapping$emulatorName), function(emulator_mapping) {
+
     # TODO remove Ngrid when update the fldgen branch
     emulator <- fldgen::trainTP(dat = emulator_mapping[['trainingFile']], Ngrid = NULL, globalAvg_file = globalAvg_file)
 
-    # Apply over the different Hector runs. NOTE - this is going to change when we run Hector from here. When we do this 
-    # we will have to add a method to convert from Tgav C to tas K.
-    lapply(split(tgavSCN, tgavSCN$run_name), function(tgav_input){
+    # Apply over the different Hector runs.
+    # NOTE - this is going to change when we run Hector from here. When we do
+    # this we will have to add a method to convert from Tgav C to tas K.
+    lapply(split(tgavSCN, tgavSCN$run_name), function(tgav_input) {
 
-      # Subset the Hector tas data so that it only includes values from the emulator training years. 
+      # Subset the Hector tas data so that it only includes values from the
+      # emulator training years.
       # TODO this section might change with fldgen updates.
       start_stop <- as.integer(unlist(stringr::str_split(stringr::str_sub(basename(emulator$infiles), -12, -4), pattern = '-')))
       start_yr   <- min(start_stop)
       stop_yr    <- max(start_stop)
       tgav_input <- tgav_input[tgav_input$time %in% start_yr:stop_yr, ]
-      
+
       # Generate N number of gridded realizations
-      # TODO when we rung on pic we are going to want to use doParallel::registerDoParallel() and %dopar% to parallelize this step 
+      # TODO when we run on pic we are going to want to use
+      # doParallel::registerDoParallel() and %dopar% to parallelize this step
       foreach::foreach(i = 1:N) %do% {
-        
+
         # Generate the full tas and pr annual grids without any NA values.
         full_grids <- fldgen::generate.TP.fullgrids(emulator = emulator, residgrids = generate.TP.resids(emulator, 1),  tgav = tgav_input, addNAs = FALSE)
 
-        # Replace the negative pr values in the full grids with 0s. 
+        # Replace the negative pr values in the full grids with 0s.
         # TODO This is just a temporary fix and will eventually be removed.
         negative_pr_cells <- which(full_grids$fullgrids[[1]]$pr < 0)
-        full_grids$fullgrids[[1]]$pr[negative_pr_cells] <- 0 
-        
-        # Monthly downscaling 
+        full_grids$fullgrids[[1]]$pr[negative_pr_cells] <- 0
+
+        # Monthly downscaling
         # TODO make the frac argument dynamic so that it reflects the emulator ESM.
         monthly_pr  <- an2month::monthly_downscaling(
           var = 'pr',
@@ -100,31 +108,31 @@ grand_experiment <- function(mapping, tgavSCN, N, globalAvg_file = 'GlobalAvg.tx
           fld_time = full_grids$time
         )
 
-        # add the code to run xanthos
         run_xanthos(monthly_pr, monthly_tas)
 
+        stop("You ran Xanthos, good job!")
       }
-
     })
-
   })
-
 }
 
 
 # Run Xanthos
 #
-# monthly_pr:
-#   List containing data (2d matrix), coordinates (lat/lon mapping), and units (string)
-# monthly_tas:
-#   List containing data (2d matrix), coordinates (lat/lon mapping), and units (string)
+# Args:
+#   monthly_pr: List containing data (2d matrix), coordinates (lat/lon mapping),
+#     and units (string)
+#   monthly_tas: List containing data (2d matrix), coordinates (lat/lon mapping),
+#     and units (string)
 run_xanthos <- function(monthly_pr, monthly_tas) {
+  stopifnot(monthly_pr$units == "mm_month-1")
+  stopifnot(monthly_tas$units == "C")
 
-  # Full file path to xanthos directory
-  XANTHOS_DIR <- '/Users/brau074/Documents/xanthos-work/xanthos/'
+  # Full file path to xanthos input/output directory
+  XANTHOS_IO_DIR <- '/Users/brau074/Documents/grand_experiment/xanthos_io/'
 
   # Load reference file mapping Xanthos cell index to lat/lon
-  xcells_path <- paste0(XANTHOS_DIR, 'example/input/reference/coordinates.csv')
+  xcells_path <- paste0(XANTHOS_IO_DIR, 'input/reference/coordinates.csv')
   xcolnames <- c('cell_id', 'lon', 'lat', 'lon_idx', 'lat_idx')
   xcells <- read.csv(xcells_path, header = F, col.names = xcolnames)
 
@@ -135,17 +143,12 @@ run_xanthos <- function(monthly_pr, monthly_tas) {
   pr_x  <- extract_xanthos_cells2d(monthly_pr$data, xcells, fldgencells)
   tas_x <- extract_xanthos_cells2d(monthly_tas$data, xcells, fldgencells)
 
+  # Input temperature data for Xanthos as an R matrix. Must be a named list
+  # where the name is the Xanthos config parameter it is replacing.
+  xth_params <- list(trn_tas = tas_x, PrecipitationFile = pr_x)
 
-  # Input temperature data for Xanthos as an R matrix. Must be a named list where
-  # the name is the Xanthos config parameter it is replacing.
-  xth_params <- list(pm_tas = tas_x, PrecipitationFile = pr_x)
-  xth_params <- list(PrecipitationFile = pr_x)
-
-
-  # Instantiate and run Xanthos ---------------------------------------------
-
-  # Instantiate Xanthos
-  config_path <- paste0(XANTHOS_DIR, '../trn_abcd_mrtm.ini')
+  # Instantiate and run Xanthos
+  config_path <- paste0(XANTHOS_IO_DIR, 'trn_abcd_mrtm_gexp.ini')
   xth.mod <- import('xanthos')
   xth <- xth.mod$Xanthos(config_path)
 
@@ -175,8 +178,14 @@ extract_xanthos_cells2d <- function(cells, xcells, ycells) {
     inner_join(xcells, by = c('lat', 'lon')) %>%
     arrange(cell_id) # Order by Xanthos cell id for indexing
 
+  # Rows and columns need to be flipped
   cells[ , bothcells$index]
   return(t(cells))
 }
 
 
+run_all <- function() {
+  mapping <- '/Users/brau074/Documents/grand_experiment/emulator_mapping.csv'
+  tgavSCN <- '/Users/brau074/Documents/grand_experiment/hector_tgav.csv'
+  grand_experiment(mapping, tgavSCN, 1)
+}
