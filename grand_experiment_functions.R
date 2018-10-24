@@ -33,6 +33,15 @@ init <- function(mapping, tgavSCN, xanthos_dir) {
   Sys.setenv(RETICULATE_PYTHON = Sys.which('python'))
   stopifnot(py_numpy_available(initialize = TRUE))
 
+  # Make sure Xanthos can be found
+  imp <- import('imp')
+  tryCatch(imp$find_module('xanthos'), error = function(e) {
+    stop("You must install Xanthos before running the Grand Experiment.\n",
+         "For information on setting up Xanthos, please see ",
+         "https://github.com/JGCRI/xanthos")
+  })
+
+
   return(list(mapping = mapping, tgavSCN = tgavSCN))
 }
 
