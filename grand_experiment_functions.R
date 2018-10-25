@@ -91,6 +91,7 @@ grand_experiment <- function(mapping, tgavSCN, xanthos_dir, N, globalAvg_file = 
       # Generate N number of gridded realizations
       # TODO when we run on pic we are going to want to use
       # doParallel::registerDoParallel() and %dopar% to parallelize this step
+      print(paste(Sys.time(), '\t\tRunning', N, 'runs for', tgav_input$run_name))
       foreach::foreach(i = 1:N) %do% {
 
         # Generate the full tas and pr annual grids without any NA values.
