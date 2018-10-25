@@ -118,7 +118,8 @@ grand_experiment <- function(mapping, tgavSCN, xanthos_dir, N, globalAvg_file = 
         )
 
         run_id <- paste(unique(emulator_mapping$emulatorName),
-                        unique(tgav_input$run_name), i, sep = '_')
+                        unique(tgav_input$run_name),
+                        sprintf(paste0('%0', nchar(N), 'd'), i), sep = '_')
         run_xanthos(xanthos_dir, monthly_pr, monthly_tas, run_id)
       }
     })
